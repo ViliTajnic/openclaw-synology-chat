@@ -55,6 +55,7 @@ export interface SynologyWebhookPayload {
   username: string;
   post_id?: string;
   timestamp?: string;
-  text: string;
+  text?: string;
+  file_name?: string;
   trigger_word?: string;
 }

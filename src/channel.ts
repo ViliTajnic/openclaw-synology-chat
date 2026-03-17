@@ -7,7 +7,6 @@
 import {
   DEFAULT_ACCOUNT_ID,
   setAccountEnabledInConfigSection,
-  registerPluginHttpRoute,
   buildChannelConfigSchema,
 } from "openclaw/plugin-sdk";
 import { z } from "zod";
@@ -16,6 +15,19 @@ import { sendMessage, sendFileUrl } from "./client.js";
 import { getSynologyRuntime } from "./runtime.js";
 import type { ResolvedSynologyChatAccount } from "./types.js";
 import { createWebhookHandler } from "./webhook-handler.js";
+
+// --- Webhook delegate (set by startAccount, read by the api-registered HTTP route) ---
+
+type WebhookHandler = (req: any, res: any) => void | Promise<void>;
+let webhookDelegate: WebhookHandler | null = null;
+
+export function setWebhookDelegate(fn: WebhookHandler | null): void {
+  webhookDelegate = fn;
+}
+
+export function getWebhookDelegate(): WebhookHandler | null {
+  return webhookDelegate;
+}
 
 const CHANNEL_ID = "synology-chat";
 const SynologyChatConfigSchema = buildChannelConfigSchema(z.object({}).passthrough());
@@ -208,16 +220,25 @@ export function createSynologyChatPlugin() {
         const { cfg, accountId, log } = ctx;
         const account = resolveAccount(cfg, accountId);
 
+        const waitUntilAbort = () =>
+          new Promise<void>((resolve) => {
+            if (ctx.abortSignal?.aborted) {
+              resolve();
+              return;
+            }
+            ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+
         if (!account.enabled) {
           log?.info?.(`Synology Chat account ${accountId} is disabled, skipping`);
-          return { stop: () => {} };
+          return waitUntilAbort();
         }
 
         if (!account.token || !account.incomingUrl) {
           log?.warn?.(
             `Synology Chat account ${accountId} not fully configured (missing token or incomingUrl)`,
           );
-          return { stop: () => {} };
+          return waitUntilAbort();
         }
 
         log?.info?.(
@@ -270,23 +291,18 @@ export function createSynologyChatPlugin() {
           log,
         });
 
-        // Register HTTP route via the SDK
-        const unregister = registerPluginHttpRoute({
-          path: account.webhookPath,
-          pluginId: CHANNEL_ID,
-          accountId: account.accountId,
-          log: (msg: string) => log?.info?.(msg),
-          handler,
-        });
+        // Activate the delegate so the api-registered HTTP route forwards requests here.
+        setWebhookDelegate(handler);
+        log?.info?.(
+          `Synology Chat webhook ready at ${account.webhookPath} (account: ${accountId})`,
+        );
 
-        log?.info?.(`Registered HTTP route: ${account.webhookPath} for Synology Chat`);
+        // Keep channel alive until the abort signal fires (webhook mode is passive).
+        await waitUntilAbort();
 
-        return {
-          stop: () => {
-            log?.info?.(`Stopping Synology Chat channel (account: ${accountId})`);
-            if (typeof unregister === "function") unregister();
-          },
-        };
+        // Clean up on stop
+        log?.info?.(`Stopping Synology Chat channel (account: ${accountId})`);
+        setWebhookDelegate(null);
       },
 
       stopAccount: async (ctx: any) => {

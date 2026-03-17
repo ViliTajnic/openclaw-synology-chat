@@ -46,12 +46,13 @@ function readBody(req: IncomingMessage): Promise<string> {
 function parsePayload(body: string): SynologyWebhookPayload | null {
   const parsed = querystring.parse(body);
 
-  const token = String(parsed.token ?? "");
+  const token = String(parsed.token ?? "").replace(/^"+|"+$/g, "");
   const userId = String(parsed.user_id ?? "");
   const username = String(parsed.username ?? "unknown");
-  const text = String(parsed.text ?? "");
+  const text = parsed.text ? String(parsed.text) : undefined;
+  const fileName = parsed.file_name ? String(parsed.file_name) : undefined;
 
-  if (!token || !userId || !text) return null;
+  if (!token || !userId || (!text && !fileName)) return null;
 
   return {
     token,
@@ -62,6 +63,7 @@ function parsePayload(body: string): SynologyWebhookPayload | null {
     post_id: parsed.post_id ? String(parsed.post_id) : undefined,
     timestamp: parsed.timestamp ? String(parsed.timestamp) : undefined,
     text,
+    file_name: fileName,
     trigger_word: parsed.trigger_word ? String(parsed.trigger_word) : undefined,
   };
 }
@@ -126,7 +128,7 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
     // Parse payload
     const payload = parsePayload(body);
     if (!payload) {
-      respond(res, 400, { error: "Missing required fields (token, user_id, text)" });
+      respond(res, 400, { error: "Missing required fields (token, user_id, text or file_name)" });
       return;
     }
 
@@ -160,11 +162,17 @@ export function createWebhookHandler(deps: WebhookHandlerDeps) {
     }
 
     // Sanitize input
-    let cleanText = sanitizeInput(payload.text);
+    let cleanText = sanitizeInput(payload.text ?? "");
 
     // Strip trigger word
     if (payload.trigger_word && cleanText.startsWith(payload.trigger_word)) {
       cleanText = cleanText.slice(payload.trigger_word.length).trim();
+    }
+
+    // Append file attachment note (Synology Chat does not send a download URL)
+    if (payload.file_name) {
+      const note = `(The user attached a file named "${payload.file_name}". Synology Chat does not provide a download URL, so the file content cannot be accessed directly.)`;
+      cleanText = cleanText ? `${cleanText}\n${note}` : note;
     }
 
     if (!cleanText) {
