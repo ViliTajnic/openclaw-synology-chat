@@ -68,7 +68,7 @@ Set the outgoing webhook URL to your OpenClaw gateway address + the webhook path
 http://<your-mac-ip>:18789/channels/synology-chat/webhook
 ```
 
-Example: `http://192.168.1.88:18789/channels/synology-chat/webhook`
+Example: `http://192.168.x.x:18789/channels/synology-chat/webhook`
 
 > The gateway must be reachable from the NAS. Set `gateway.bind` to `"lan"` (not `"loopback"`) in `openclaw.json`.
 
@@ -83,7 +83,7 @@ Add a `channels.synology-chat` section to `~/.openclaw/openclaw.json`:
       "enabled": true,
       "token": "<outgoing-webhook-token>",
       "incomingUrl": "<incoming-webhook-url>",
-      "nasHost": "192.168.1.91",
+      "nasHost": "192.168.x.x",
       "webhookPath": "/channels/synology-chat/webhook",
       "dmPolicy": "allowlist",
       "allowedUserIds": ["1", "2"],
